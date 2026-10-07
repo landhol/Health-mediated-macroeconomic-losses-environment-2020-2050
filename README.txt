@@ -209,9 +209,6 @@ Monte Carlo-based sensitivity analysis
 --------------------------------------
 The economic-parameter sensitivity analysis uses 1,000 simulations.
 
-Random seed:
-123
-
 Parameters varied from 50% to 150% of their baseline values:
 - capital share (alpha);
 - depreciation rate (delta);
@@ -225,16 +222,6 @@ Baseline Mincer coefficients:
 
 Baseline annual depreciation rate:
 - delta = 0.05
-
-Sampling structure:
-- capital share is sampled separately for each country and then sorted within country;
-- saving rate is sampled separately for each country and then sorted within country;
-- depreciation is sampled and then sorted;
-- the same simulation rank is paired across capital share, saving rate, and depreciation;
-- the three Mincer coefficients are multiplied by one common random scaling factor sampled
-  from 0.5 to 1.5, preserving their relative ratios;
-- the Mincer scaling factor is not sorted.
-
 
 Uncertainty interpretation
 --------------------------
