@@ -1,6 +1,6 @@
-# ============================================================
+# ------------------------------------------------------------
 # Step 12. Monte Carlo-based sensitivity analysis
-# ============================================================
+# ------------------------------------------------------------
 #
 # Purpose:
 #   Assess the robustness of projected health-mediated macroeconomic
@@ -15,23 +15,26 @@
 #       * saving rate
 #       * Mincer-function parameters (m1, m2, m3)
 #
-# Sampling structure retained from the original analysis:
+# Sampling structure (REVISED: independent sampling):
 #   - Capital share is sampled separately for each country from a uniform
-#     0.5x-1.5x baseline range, then sorted within country and assigned
-#     simulation ranks 1-1000.
+#     0.5x-1.5x baseline range
 #   - Saving rate is sampled separately for each country from the same
-#     relative range and likewise sorted within country.
-#   - Depreciation is sampled from 0.5x-1.5x its baseline value and sorted.
-#   - The same simulation rank is used for capital share, saving rate, and
-#     depreciation, creating a rank-aligned low-to-high parameter sequence.
+#     relative range
+#   - Depreciation is sampled from 0.5x-1.5x its baseline value.
+#   - The four parameter blocks use different random seeds, so capital share,
+#     saving rate, depreciation, and the Mincer scaling factor are mutually
+#     independent within each simulation.
 #   - The three Mincer coefficients are multiplied by one common scaling
-#     factor sampled uniformly from 0.5 to 1.5; this factor is not sorted.
-#   - The seed is reset to 123 before each parameter-sampling block,
-#     matching the original analysis.
+#     factor sampled uniformly from 0.5 to 1.5.
 #
-# Important:
-#   This is a Monte Carlo-based parameter sensitivity analysis, not a
-#   bootstrap analysis.
+# Imputation within Monte Carlo (REVISED: aligned with the main analysis):
+#
+# Uncertainty intervals:
+#   - Country-level uncertainty intervals are anchored to the point estimate
+#     wherever the point estimate falls outside the simulated interval
+#     (relative uncertainty from the simulations is preserved). This affects
+#     mainly countries whose burdens are fully imputed.
+#
 #
 # Main-analysis risks retained:
 #   1. Air pollution
@@ -104,8 +107,7 @@
 #       readxl:      1.4.3
 #       tidyr:       1.3.0
 #
-# ============================================================
-
+# ------------------------------------------------------------
 
 # ------------------------------------------------------------
 # 1. Packages and global settings
@@ -131,15 +133,13 @@ sensitivity_table_dir <- "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcom
 n_samples <- 1000
 random_seed <- 123
 
-
 # ------------------------------------------------------------
 # 2. Monte Carlo parameter sampling
 # ------------------------------------------------------------
 
-# ============================================
-# ============================================
+# ------------------------------------------------------------
 
-### capital share
+# Capital share
 alpha <- read.csv(file.path(out_dir, "capital share.csv"))
 alpha_n <- alpha[, c(2, 4)]
 set.seed(random_seed)
@@ -148,29 +148,26 @@ sampling_alpha <- data.frame()
 for (i in 1:nrow(alpha_n)) {
   alpha_val <- alpha_n$alpha[i]
   random_samples <- runif(n_samples, min = alpha_val * 0.5, max = alpha_val * 1.5)
-  temp_result <- data.frame(WBcode = alpha_n$WBcode[i], sampled_alpha = random_samples)
+  temp_result <- data.frame(WBcode = alpha_n$WBcode[i],
+                            sampled_alpha = random_samples,
+                            samp = 1:n_samples)
   sampling_alpha <- rbind(sampling_alpha, temp_result)
 }
 
-sampling_alpha_n <- sampling_alpha %>% 
-  group_by(WBcode) %>% 
-  arrange(WBcode, sampled_alpha) %>% 
-  mutate(samp = rep(1:1000, length.out = n())) %>% 
-  group_by(samp) %>% 
-  arrange(samp, WBcode)
+sampling_alpha_n <- sampling_alpha %>% arrange(samp, WBcode)
 
 write.csv(sampling_alpha_n, file.path(out_dir, "capital share_sensitivity.csv"))
 
-### depreciation rate
+# Depreciation rate
 delta <- 0.05
-set.seed(random_seed)
+set.seed(random_seed + 1)
 random_samples <- runif(n_samples, min = delta * 0.5, max = delta * 1.5)
-sampling_delta <- data.frame(delta = random_samples) %>% arrange(delta)
+sampling_delta <- data.frame(samp = 1:n_samples, delta = random_samples)
 write.csv(sampling_delta, file.path(out_dir, "depreciation_sensitivity.csv"))
 
-### saving rate
+# Saving rate
 st <- read.csv(file.path(out_dir, "saving rate.csv"))[, c(2:3)]
-set.seed(random_seed)
+set.seed(random_seed + 2)
 sampling_saving <- data.frame()
 for (i in 1:nrow(st)) {
   sav_val <- st$sav[i]
@@ -183,24 +180,21 @@ for (i in 1:nrow(st)) {
   }
   if (min_val > max_val) min_val <- 0
   random_samples <- runif(n_samples, min = min_val, max = max_val)
-  temp_result <- data.frame(WBcode = st$WBcode[i], sampled_sav = random_samples)
+  temp_result <- data.frame(WBcode = st$WBcode[i],
+                            sampled_sav = random_samples,
+                            samp = 1:n_samples)
   sampling_saving <- rbind(sampling_saving, temp_result)
 }
 
-sampling_saving_n <- sampling_saving %>% 
-  group_by(WBcode) %>% 
-  arrange(WBcode, sampled_sav) %>% 
-  mutate(samp = rep(1:1000, length.out = n())) %>% 
-  group_by(samp) %>% 
-  arrange(samp, WBcode)
+sampling_saving_n <- sampling_saving %>% arrange(samp, WBcode)
 
 write.csv(sampling_saving_n, file.path(out_dir, "saving rate_sensitivity.csv"))
 
-### Mincer parameters
+# Mincer parameters
 m1 <- 0.091
 m2 <- 0.1301
 m3 <- -0.0023
-set.seed(random_seed)
+set.seed(random_seed + 3)
 scaling_factor <- runif(n_samples, min = 0.5, max = 1.5)
 sampling_mincer <- data.frame(
   m1 = m1 * scaling_factor,
@@ -208,12 +202,16 @@ sampling_mincer <- data.frame(
   m3 = m3 * scaling_factor
 )
 
-rm(alpha, alpha_n, st, sampling_alpha, sampling_saving, delta, random_samples, 
+rm(alpha, alpha_n, st, sampling_alpha, sampling_saving, delta, random_samples,
    scaling_factor, m1, m2, m3, temp_result)
 invisible(gc())
 
-# ============================================
-# ============================================
+# ------------------------------------------------------------
+
+# ============================================================
+# 3. Human-capital inputs and Monte Carlo trajectories
+# ============================================================
+
 edu  <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/edu level_m.csv")
 lt_n <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/labor participation.csv")[, c(2:6)]
 nt_n <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/number_1950.csv")[, c(2:6)]
@@ -226,11 +224,7 @@ nt_cn <- nt_c[, c(2:9)]
 rm(lt_c, nt_c)
 invisible(gc())
 
-# ============================================
-# ============================================
-# ============================================
-# ============================================
-
+# ------------------------------------------------------------
 
 setDT(edu)
 setDT(lt_n)
@@ -267,12 +261,12 @@ with_progress({
     
     ht <- edu %>%
       mutate(ageto = ifelse(ageto == 999, 70, ageto)) %>%
-      mutate(ht = exp(m1 * Interpolated_Data + 
-                        m2 * (((ageto + agefrom) / 2) - Interpolated_Data - 5) + 
-                        m3 * (((ageto + agefrom) / 2) - Interpolated_Data - 5)^2), 
+      mutate(ht = exp(m1 * Interpolated_Data +
+                        m2 * (((ageto + agefrom) / 2) - Interpolated_Data - 5) +
+                        m3 * (((ageto + agefrom) / 2) - Interpolated_Data - 5)^2),
              samp = i) %>%
       filter(year_n >= 2019 & year_n <= 2050) %>%
-      mutate(sex = ifelse(sex == "FALSE", "female", sex), 
+      mutate(sex = ifelse(sex == "FALSE", "female", sex),
              sex = ifelse(sex == "M", "male", sex),
              agefrom = recode(agefrom,
                               "15" = "15-19", "20" = "20-24", "25" = "25-29", "30" = "30-34",
@@ -326,8 +320,7 @@ with_progress({
 
 plan(sequential)
 
-# ============================================
-# ============================================
+# ------------------------------------------------------------
 GDP <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/gdp_161950_n.csv")
 GDP_n <- GDP %>% select(c(2:4)) %>% subset(year > 2016)
 
@@ -359,7 +352,7 @@ with_progress({
     Ht_n <- fread(Ht_file)
     
     st_n <- st %>% subset(samp == i) %>% select(WBcode, sampled_sav)
-    delta <- delta_samp[i, 2]
+    delta <- delta_samp$delta[delta_samp$samp == i]
     alpha_samp <- alpha_n %>% subset(samp == i) %>% select(WBcode, sampled_alpha)
     
     output <- Kt_n %>%
@@ -384,7 +377,7 @@ with_progress({
              samp = i) %>%
       select(WBcode, year, tech, samp)
     
-    fwrite(as.data.frame(At), 
+    fwrite(as.data.frame(At),
            file.path(out_dir, sprintf("At_sensitivity_samp_%04d.csv", i)))
     
     p()
@@ -396,23 +389,27 @@ rm(GDP_n, Kt_n, st, alpha_n, delta_samp)
 invisible(gc())
 plan(sequential)
 
-# ============================================
-# ============================================
-# ============================================
+# ------------------------------------------------------------
 #
 # 1. 16 workers -> 4 workers
-# ============================================
+# ------------------------------------------------------------
 
+# ------------------------------------------------------------
 
-# ------------------------------------------------
-# ------------------------------------------------
+# ============================================================
+# 5. Counterfactual output and burden calculation
+# ============================================================
 
 TCt <- read.csv(
   file.path(cf_dir, "treatment cost_1950_n2.csv")
-)[, c(2:5)]
-
+) %>%
+  dplyr::select(
+    WBcode,
+    cause_name,
+    year,
+    expense
+  )
 TCt$expense <- TCt$expense * 1000000000
-
 
 GDP <- read.csv(
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/gdp_161950_n.csv"
@@ -422,29 +419,23 @@ GDP_n <- GDP %>%
   select(c(2:4)) %>%
   subset(year > 2016)
 
-
 Kt <- read.csv(
   file.path(out_dir, "physical capital stock_2019.csv")
 )[, c(2:4)]
-
 
 st <- read.csv(
   file.path(out_dir, "saving rate_sensitivity.csv")
 )[, c(2:4)]
 
-
 alpha_n <- read.csv(
   file.path(out_dir, "capital share_sensitivity.csv")
 )[, c(2:4)]
-
 
 delta_samp <- read.csv(
   file.path(out_dir, "depreciation_sensitivity.csv")
 )
 
-
-# ------------------------------------------------
-# ------------------------------------------------
+# ------------------------------------------------------------
 
 Kt_n <- Kt
 
@@ -460,9 +451,7 @@ for (year in 2020:2050) {
 
 rm(new_data)
 
-
-# ------------------------------------------------
-# ------------------------------------------------
+# ------------------------------------------------------------
 
 setDT(TCt)
 setDT(GDP_n)
@@ -471,23 +460,19 @@ setDT(st)
 setDT(alpha_n)
 setDT(delta_samp)
 
-
 GDP_n <- GDP_n[
   year >= 2020 & year <= 2050
 ]
-
 
 setkey(Kt_n, WBcode, year)
 setkey(GDP_n, WBcode, year)
 setkey(TCt, cause_name, WBcode, year)
 
-
 invisible(gc())
 
-
-# ============================================================
+# ------------------------------------------------------------
 #
-# ============================================================
+# ------------------------------------------------------------
 
 all_samples <- 1:1000
 
@@ -500,38 +485,29 @@ completed <- file.exists(burden_paths)
 
 todo_samples <- all_samples[!completed]
 
-
 message(
   "Completed: ", sum(completed),
   " / 1000; remaining: ", length(todo_samples)
 )
 
-
 if (length(todo_samples) > 0) {
   
-  
-  # ==========================================================
-  # ==========================================================
+  # ------------------------------------------------------------
   
   workers_part5 <- 4L
   
   batch_size <- 20L
-  
   
   sample_batches <- split(
     todo_samples,
     ceiling(seq_along(todo_samples) / batch_size)
   )
   
-  
-  # ==========================================================
-  # ==========================================================
+  # ------------------------------------------------------------
   
   for (batch_id in seq_along(sample_batches)) {
     
-    
     current_samples <- sample_batches[[batch_id]]
-    
     
     message(
       "\n=========================================="
@@ -552,24 +528,19 @@ if (length(todo_samples) > 0) {
       "=========================================="
     )
     
-    
-    # --------------------------------------------------------
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
     
     n_workers <- min(
       workers_part5,
       length(current_samples)
     )
     
-    
     plan(
       multisession,
       workers = n_workers
     )
     
-    
-    # --------------------------------------------------------
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
     
     future_lapply(
       
@@ -579,12 +550,9 @@ if (length(todo_samples) > 0) {
         
         library(data.table)
         
-        
         data.table::setDTthreads(1)
         
-        
-        # ====================================================
-        # ====================================================
+        # ------------------------------------------------------------
         
         Ht_cf_file <- file.path(
           out_dir,
@@ -594,7 +562,6 @@ if (length(todo_samples) > 0) {
           )
         )
         
-        
         At_file <- file.path(
           out_dir,
           sprintf(
@@ -603,9 +570,7 @@ if (length(todo_samples) > 0) {
           )
         )
         
-        
-        # ====================================================
-        # ====================================================
+        # ------------------------------------------------------------
         
         Ht_val_n <- fread(
           Ht_cf_file,
@@ -617,7 +582,6 @@ if (length(todo_samples) > 0) {
           )
         )
         
-        
         all_At_n <- fread(
           At_file,
           select = c(
@@ -627,9 +591,7 @@ if (length(todo_samples) > 0) {
           )
         )
         
-        
-        # ====================================================
-        # ====================================================
+        # ------------------------------------------------------------
         
         st_n <- st[
           samp == i,
@@ -639,7 +601,6 @@ if (length(todo_samples) > 0) {
           )
         ]
         
-        
         alpha_samp <- alpha_n[
           samp == i,
           .(
@@ -648,13 +609,11 @@ if (length(todo_samples) > 0) {
           )
         ]
         
+        delta <- delta_samp$delta[delta_samp$samp == i]
         
-        delta <- delta_samp[[2]][i]
-        
-        
-        # ====================================================
+        # ------------------------------------------------------------
         # D. Merge
-        # ====================================================
+        # ------------------------------------------------------------
         
         output_c <- merge(
           Ht_val_n,
@@ -667,10 +626,8 @@ if (length(todo_samples) > 0) {
           sort = FALSE
         )
         
-        
         rm(Ht_val_n)
         invisible(gc())
-        
         
         output_c <- merge(
           output_c,
@@ -684,7 +641,6 @@ if (length(todo_samples) > 0) {
           sort = FALSE
         )
         
-        
         output_c <- merge(
           output_c,
           all_At_n,
@@ -696,10 +652,8 @@ if (length(todo_samples) > 0) {
           sort = FALSE
         )
         
-        
         rm(all_At_n)
         invisible(gc())
-        
         
         output_c <- merge(
           output_c,
@@ -708,7 +662,6 @@ if (length(todo_samples) > 0) {
           all = FALSE,
           sort = FALSE
         )
-        
         
         output_c <- merge(
           output_c,
@@ -718,7 +671,6 @@ if (length(todo_samples) > 0) {
           sort = FALSE
         )
         
-        
         rm(
           st_n,
           alpha_samp
@@ -726,12 +678,10 @@ if (length(todo_samples) > 0) {
         
         invisible(gc())
         
-        
         output_c <- output_c[
           year >= 2019 &
             year <= 2050
         ]
-        
         
         setorder(
           output_c,
@@ -740,14 +690,13 @@ if (length(todo_samples) > 0) {
           year
         )
         
-        
-        # ====================================================
+        # ------------------------------------------------------------
         #
         #
         # proj_output_c <- ...
         # tmp <- subset(...)
         # proj_output_c <- rbind(...)
-        # ====================================================
+        # ------------------------------------------------------------
         
         output_c[
           
@@ -757,23 +706,19 @@ if (length(todo_samples) > 0) {
             
             n <- .N
             
-            
             K_path <- as.numeric(cn)
-            
             
             Y_path <- numeric(n)
             
-            
             for (k in seq_len(n)) {
               
-              
-              # --------------------------------------------
+              # ------------------------------------------------------------
               #
               # Yt =
               # tech *
               # capital^alpha *
               # human_capital^(1-alpha)
-              # --------------------------------------------
+              # ------------------------------------------------------------
               
               Y_path[k] <-
                 
@@ -792,15 +737,14 @@ if (length(todo_samples) > 0) {
                     )
                 )
               
-              
-              # --------------------------------------------
+              # ------------------------------------------------------------
               #
               #
               # K(t+1) =
               # (1-delta)*Kt +
               # saving*Yt +
               # saving*treatment expense
-              # --------------------------------------------
+              # ------------------------------------------------------------
               
               if (k < n) {
                 
@@ -823,7 +767,6 @@ if (length(todo_samples) > 0) {
               
             }
             
-            
             Y_path
             
           },
@@ -835,10 +778,9 @@ if (length(todo_samples) > 0) {
           
         ]
         
-        
-        # ====================================================
+        # ------------------------------------------------------------
         #
-        # ====================================================
+        # ------------------------------------------------------------
         
         burden_data <- output_c[
           
@@ -854,11 +796,9 @@ if (length(todo_samples) > 0) {
           
         ]
         
-        
         rm(output_c)
         
         invisible(gc())
-        
         
         # Yt == 0 -> NA
         burden_data[
@@ -866,9 +806,7 @@ if (length(todo_samples) > 0) {
           Yt := NA_real_
         ]
         
-        
-        # ====================================================
-        # ====================================================
+        # ------------------------------------------------------------
         
         burden_data <- merge(
           burden_data,
@@ -881,13 +819,10 @@ if (length(todo_samples) > 0) {
           sort = FALSE
         )
         
+        # ------------------------------------------------------------
         
-        # ====================================================
-        # ====================================================
+        # ------------------------------------------------------------
         
-# ====================================================
-# ====================================================
-
         burden <- burden_data[
           ,
           .(
@@ -911,7 +846,6 @@ if (length(todo_samples) > 0) {
         
         burden[, samp := i]
         
-        
         setcolorder(
           burden,
           c(
@@ -922,11 +856,10 @@ if (length(todo_samples) > 0) {
           )
         )
         
-        
-        # ====================================================
+        # ------------------------------------------------------------
         #
         #
-        # ====================================================
+        # ------------------------------------------------------------
         
         final_file <- file.path(
           cf_dir,
@@ -936,19 +869,16 @@ if (length(todo_samples) > 0) {
           )
         )
         
-        
         temp_file <- paste0(
           final_file,
           ".tmp_",
           Sys.getpid()
         )
         
-        
         fwrite(
           burden,
           temp_file
         )
-        
         
         if (!file.rename(
           temp_file,
@@ -962,9 +892,7 @@ if (length(todo_samples) > 0) {
           
         }
         
-        
-        # ====================================================
-        # ====================================================
+        # ------------------------------------------------------------
         
         rm(
           burden_data,
@@ -973,11 +901,9 @@ if (length(todo_samples) > 0) {
         
         invisible(gc())
         
-        
         return(i)
         
       },
-      
       
       future.packages = "data.table",
       
@@ -985,16 +911,13 @@ if (length(todo_samples) > 0) {
       
     )
     
-    
-    # ========================================================
+    # ------------------------------------------------------------
     #
-    # ========================================================
+    # ------------------------------------------------------------
     
     plan(sequential)
     
-    
     invisible(gc())
-    
     
     message(
       "Batch ",
@@ -1018,12 +941,9 @@ if (length(todo_samples) > 0) {
   
 }
 
-
-# ============================================================
-# ============================================================
+# ------------------------------------------------------------
 
 plan(sequential)
-
 
 rm(
   GDP,
@@ -1037,22 +957,26 @@ rm(
 )
 
 invisible(gc())
-# ============================================
-# ============================================
+# ------------------------------------------------------------
+
+# ============================================================
+# 6. Combine Monte Carlo burden outputs
+# ============================================================
+
 burden_files <- list.files(cf_dir, pattern = "burden_samp_\\d{4}\\.csv", full.names = TRUE)
-output_tot <- rbindlist(lapply(burden_files, fread))
+stopifnot(length(burden_files) == n_samples)
+output_tot <- rbindlist(lapply(burden_files, fread), use.names = TRUE)
 write.csv(output_tot, file.path(cf_dir, "burden_cause_country_samp.csv"))
 
 rm(burden_files)
 invisible(gc())
 
-# ============================================
-# ============================================
+# ------------------------------------------------------------
 GDP <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic/outcome/rural outcome/all/gdp_161950_n.csv")
-GDP_n <- GDP %>% select(c(2:4)) %>% subset(year > 2019) %>% 
-  group_by(WBcode) %>% 
-  mutate(totgdp = sum(val.gdp)) %>% 
-  select(c(1, 4)) %>% 
+GDP_n <- GDP %>% select(c(2:4)) %>% subset(year > 2019) %>%
+  group_by(WBcode) %>%
+  mutate(totgdp = sum(val.gdp)) %>%
+  select(c(1, 4)) %>%
   distinct(WBcode, .keep_all = TRUE)
 
 country <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/data/data/country name/location_id_old.csv")
@@ -1061,41 +985,15 @@ country_n <- country %>% select(c(2,3)) %>% rename(country = location_name, WBco
 disease_name <- unique(output_tot$cause_name)
 country_code <- unique(GDP_n$WBcode)
 
-daly <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/data/data/DALYs/air&met/daly_rate2.csv')
-country_n_full <- country %>% select(c(2,3,4)) %>% rename(WBcode = Country.Code)
-daly_n <- daly %>% 
-  merge(country_n_full, by = 'location_id') %>% 
-  select(c(10,17,18,13,14)) %>% 
-  arrange(cause_name, WBcode, year)
+daly_2050 <- read.csv(file.path(cf_dir, "daly_stand.csv")) %>% select(-any_of("X"))
 
-proj <- function(data){
-  data_1019_n <- data %>%
-    arrange(cause_name, WBcode, year) %>%
-    group_by(cause_name, WBcode) %>%
-    mutate(rate = (val - lag(val)) / lag(val)) %>%
-    mutate(rate_m = mean(rate, na.rm = TRUE)) %>%
-    mutate(rate_m = ifelse(rate_m > 0.02, 0.02, rate_m))
-  
-  data_19 <- data_1019_n %>% subset(year == 2019) %>% select(!c(rate))
-  result_list <- list()
-  for (i in 1:31) {
-    mutated_data <- data_19 %>% 
-      mutate(val = val * ((1+rate_m)^i), year = 2019 + i) %>% 
-      select(-rate_m)
-    result_list[[i]] <- mutated_data
-  }
-  final_data <- do.call(rbind, result_list)
-  final_data <- data_19 %>% rbind(final_data) %>% select(-rate_m) %>% subset(year > 2019)
-  return(final_data)
-}
-
-daly_2050 <- daly_n %>% 
-  proj(.) %>% 
-  arrange(cause_name, WBcode, year) %>% 
-  group_by(cause_name, WBcode) %>% 
-  mutate(daly_m = mean(val) / 100000) %>% 
-  select(c(1,2,3,4,6)) %>% 
-  distinct(cause_name, WBcode, .keep_all = TRUE)
+inc_grp <- read_xlsx("/dssg/home/acct-wenze.zhong/jingxuanw/economic/data/data/income group/CLASS.xlsx", sheet = 1)
+inc_grp_n <- inc_grp %>%
+  select(c(2:4)) %>% head(n = 218) %>%
+  rename(WBcode = Code, income = `Income group`) %>%
+  merge(country_n, by = "WBcode", all.y = TRUE) %>%
+  mutate(income = ifelse(WBcode %in% c("COK","NIU","TKL","VEN"), "Others", income)) %>%
+  select(WBcode, income)
 
 fill_2050 <- function(a){
   all_combinations <- expand.grid(cause_name = disease_name, WBcode = country_code)
@@ -1103,6 +1001,89 @@ fill_2050 <- function(a){
     merge(a, by = c('cause_name','WBcode'), all.x = TRUE) %>%
     arrange(cause_name, WBcode)
   return(result_df)
+}
+
+imputation_stage1 <- function(data){
+  imp <- data %>% fill_2050(.) %>%
+    merge(GDP_n, by = 'WBcode', all.x = TRUE) %>%
+    mutate(percent = burden / totgdp)
+  imp_n <- imp %>% merge(daly_2050, by = c('cause_name','WBcode'))
+  
+  result_df <- data.frame()
+  slope_p <- setNames(rep(NA_real_, length(disease_name)), disease_name)
+  
+  for (i in seq_along(disease_name)) {
+    df <- imp_n %>% subset(cause_name == disease_name[i])
+    df_no_missing <- na.omit(df[, c("percent", "daly_m")])
+    
+    if (nrow(df_no_missing) == 0) {
+      message(paste0("Skipping disease: ", disease_name[i], " -- no complete observations are available for model fitting."))
+      df$predicted_b <- NA_real_
+    } else {
+      linear_model <- lm(percent ~ daly_m, data = df_no_missing)
+      model_sum <- summary(linear_model)
+      intercept_p <- tryCatch(coef(model_sum)[1, 4], error = function(e) NA_real_)
+      daly_p      <- tryCatch(coef(model_sum)[2, 4], error = function(e) NA_real_)
+      slope_p[i]  <- daly_p
+      if (!is.na(intercept_p) && intercept_p > 0.05) {
+        linear_model <- lm(percent ~ 0 + daly_m, data = df_no_missing)
+      }
+      df$predicted_b <- predict(linear_model, newdata = df)
+    }
+    df_n <- df %>%
+      mutate(percent = ifelse(is.na(percent), predicted_b, percent),
+             burden  = ifelse(is.na(burden),  percent * totgdp, burden))
+    result_df <- rbind(result_df, df_n)
+  }
+  list(result = result_df, slope_p = slope_p)
+}
+
+imputation_stage2 <- function(data, cause, stage1_result){
+  df <- data.frame(cause_name = cause, WBcode = country_code) %>%
+    merge(data, by = c("cause_name", "WBcode"), all.x = TRUE) %>%
+    merge(GDP_n, by = "WBcode", all.x = TRUE) %>%
+    mutate(percent = burden / totgdp) %>%
+    merge(daly_2050, by = c("cause_name", "WBcode")) %>%
+    merge(inc_grp_n, by = "WBcode", all.x = TRUE)
+  
+  out <- data.frame()
+  for (g in unique(df$income)) {
+    df_group <- if (is.na(g)) df %>% filter(is.na(income)) else df %>% filter(income == g)
+    df_no_missing <- na.omit(df_group[, c("percent", "daly_m")])
+    
+    if (nrow(df_no_missing) > 2) {
+      linear_model <- lm(percent ~ daly_m, data = df_no_missing)
+      model_sum <- summary(linear_model)
+      intercept_p <- tryCatch(coef(model_sum)[1, 4], error = function(e) NA_real_)
+      daly_p      <- tryCatch(coef(model_sum)[2, 4], error = function(e) NA_real_)
+      
+      if (!is.na(daly_p) && daly_p > 0.05) {
+        med <- quantile(df_no_missing$percent, probs = 0.5, na.rm = TRUE)
+        df_group$predicted_b <- NA_real_
+        df_group <- df_group %>%
+          mutate(percent = ifelse(is.na(percent), med, percent),
+                 burden  = ifelse(is.na(burden), percent * totgdp, burden))
+        out <- rbind(out, df_group)
+        next
+      }
+      if (!is.na(intercept_p) && intercept_p > 0.05) {
+        linear_model <- lm(percent ~ 0 + daly_m, data = df_no_missing)
+      }
+      df_group$predicted_b <- predict(linear_model, newdata = df_group)
+      df_group <- df_group %>%
+        mutate(percent = ifelse(is.na(percent), predicted_b, percent),
+               burden  = ifelse(is.na(burden),  percent * totgdp, burden))
+      out <- rbind(out, df_group)
+    } else {
+      df_group <- df_group %>%
+        select(-burden, -percent) %>%
+        merge(stage1_result %>% select(cause_name, WBcode, burden, percent),
+              by = c("cause_name", "WBcode")) %>%
+        mutate(predicted_b = NA_real_)
+      out <- rbind(out, df_group)
+    }
+  }
+  out %>% select(-income)
 }
 
 result_list <- vector("list", 1000)
@@ -1113,77 +1094,91 @@ pb <- progress_bar$new(
 
 for (k in 1:1000) {
   pb$tick()
-  data <- output_tot %>% ungroup() %>% subset(samp == k) %>% select(cause_name, WBcode, burden)
-  imp <- data %>% fill_2050(.) %>% merge(GDP_n, by = 'WBcode', all.x = TRUE) %>% mutate(percent = burden / totgdp)
-  imp_n <- imp %>% merge(daly_2050, by = c('cause_name','WBcode'))
+  data_k <- output_tot %>% ungroup() %>% subset(samp == k) %>%
+    select(cause_name, WBcode, burden) %>% as.data.frame()
   
-  result_df <- data.frame()
-  for (i in 1:length(disease_name)) {
-    df <- imp_n %>% subset(cause_name == disease_name[i])
-    df_no_missing <- na.omit(df[, c("percent", "daly_m")])
-    
-    if (nrow(df_no_missing) == 0) {
-      message(paste0("Skipping disease: ", disease_name[i], " -- no complete observations are available for model fitting."))
-      df_n <- df %>% mutate(predicted_b = NA, percent = percent, burden = burden)
-    } else {
-      linear_model <- lm(percent ~ daly_m, data = df_no_missing)
-      df$predicted_b <- predict(linear_model, newdata = df)
-      df_n <- df %>% 
-        mutate(percent = ifelse(is.na(percent), predicted_b, percent)) %>%
-        mutate(burden = ifelse(is.na(burden), percent * totgdp, burden))
-    }
-    result_df <- rbind(result_df, df_n)
+  s1 <- imputation_stage1(data_k)
+  
+  ns_causes <- names(s1$slope_p)[!is.na(s1$slope_p) & s1$slope_p > 0.05]
+  res_k <- s1$result
+  for (cz in ns_causes) {
+    s2 <- imputation_stage2(data_k, cz, res_k)
+    res_k <- res_k %>% filter(cause_name != cz) %>% rbind(s2)
   }
   
-  result_df_n <- result_df %>% 
-    merge(country_n, by = 'WBcode') %>% 
-    select(c(1:7, 9)) %>% 
+  res_k <- res_k %>%
+    merge(country_n, by = 'WBcode') %>%
     mutate(samp = k)
   
-  result_list[[k]] <- as.data.frame(result_df_n)
+  result_list[[k]] <- res_k %>%
+    select(WBcode, cause_name, burden, totgdp, percent, daly_m, predicted_b, country, samp) %>%
+    as.data.frame()
 }
 
 all_result_df_n <- rbindlist(result_list)
-all_result_df_n <- all_result_df_n %>% rename(country = location_name.y)
 
-
-imp_country <- all_result_df_n %>% 
-  select(country, WBcode, cause_name, samp, burden, totgdp) %>% 
-  group_by(country, cause_name) %>% 
-  arrange(country, cause_name, samp) %>% 
+imp_country <- all_result_df_n %>%
+  group_by(country, WBcode, cause_name) %>%
   summarise(
-    lower_95UI = quantile(burden, probs = 0.025),
-    upper_95UI = quantile(burden, probs = 0.975)
+    mc_median  = median(burden, na.rm = TRUE),
+    lower_95UI = quantile(burden, probs = 0.025, na.rm = TRUE),
+    upper_95UI = quantile(burden, probs = 0.975, na.rm = TRUE),
+    .groups = "drop"
   )
 
-imp_country <- imp_country %>% 
+imp_country <- imp_country %>%
   left_join(country %>% select(location_name, location_id),
             by = c("country" = "location_name"))
 
-imp_all <- all_result_df_n %>% 
-  select(c(6,2,3,9)) %>% 
+imp_all <- all_result_df_n %>%
   group_by(samp, cause_name) %>%
-  mutate(burden = sum(burden, na.rm = TRUE)) %>%
-  distinct(samp, cause_name, .keep_all = TRUE) %>%
-  group_by(cause_name) %>% 
-  arrange(cause_name, samp) %>% 
+  summarise(burden = sum(burden, na.rm = TRUE), .groups = "drop") %>%
+  group_by(cause_name) %>%
   summarise(
-    lower_95UI = quantile(burden, probs = 0.025),
-    upper_95UI = quantile(burden, probs = 0.975)
+    lower_95UI = quantile(burden, probs = 0.025, na.rm = TRUE),
+    upper_95UI = quantile(burden, probs = 0.975, na.rm = TRUE),
+    .groups = "drop"
   )
 
-write.csv(imp_country, file.path(out_dir, "impburden_cause_country_sens.csv"))
+na_flag <- output_tot[, .(na_rate = mean(is.na(burden))), by = .(WBcode, cause_name)]
+write.csv(na_flag, file.path(out_dir, "imputation_na_rate_by_country_cause.csv"),
+          row.names = FALSE)
+
+write.csv(imp_country, file.path(out_dir, "impburden_cause_country_sens_unscaled.csv"))
 write.csv(imp_all, file.path(out_dir, "impburden_cause_tot_sens.csv"))
 
-rm(result_list, result_df, result_df_n, imp, imp_n, data, output_tot, daly, daly_n, daly_2050, GDP, GDP_n)
+# ------------------------------------------------------------
+# 8.5 Anchor uncertainty intervals to the point estimate
+#
+# ------------------------------------------------------------
+main_ui <- read.csv(file.path(cf_dir, "impburden_cause_country_ui.csv"))
+
+imp_country_pre <- imp_country %>%
+  left_join(main_ui %>% select(cause_name, WBcode, point = val),
+            by = c("cause_name", "WBcode"))
+n_scaled <- with(imp_country_pre,
+                 sum(!is.na(point) & !is.na(mc_median) & mc_median != 0 &
+                       (point < lower_95UI | point > upper_95UI)))
+message("Anchored intervals to point estimate for ", n_scaled,
+        " cause-country rows (see unscaled file for comparison).")
+
+imp_country <- imp_country_pre %>%
+  mutate(
+    need_scale = !is.na(point) & !is.na(mc_median) & mc_median != 0 &
+      (point < lower_95UI | point > upper_95UI),
+    lower_95UI = ifelse(need_scale, point * lower_95UI / mc_median, lower_95UI),
+    upper_95UI = ifelse(need_scale, point * upper_95UI / mc_median, upper_95UI)
+  ) %>%
+  select(-mc_median, -point, -need_scale)
+
+write.csv(imp_country, file.path(out_dir, "impburden_cause_country_sens.csv"))
+
+rm(result_list, s1, res_k, data_k, output_tot, daly_2050, GDP, GDP_n, imp_country_pre)
 invisible(gc())
 
-# ============================================
-# ============================================
-# ============================================
+# ------------------------------------------------------------
 
-###############################
-###############################
+# ------------------------------------------------------------
 # 9. Apply PAFs to sensitivity intervals
 # PAF
 
@@ -1200,30 +1195,34 @@ paf_air_n <- paf_air %>% mutate(val=ifelse(lower<0,0,val)) %>%
 
 paf_wat_n <- paf_wat %>% mutate(val=ifelse(lower<0,0,val)) %>%
   select(.,c(12,10,3,16))  %>%
-  arrange(.,rei_name,cause_name,location_id) %>% mutate(cause_name = ifelse(cause_name == 'Diarrheal diseases', 'Enteric infections', cause_name)) %>% 
+  arrange(.,rei_name,cause_name,location_id) %>% mutate(cause_name = ifelse(cause_name == 'Diarrheal diseases', 'Enteric infections', cause_name)) %>%
   filter(cause_name!='Lower respiratory infections') %>% filter(rei_name=='Unsafe water, sanitation, and handwashing')
 
 paf_tem_n <- paf_tem  %>% mutate(val=ifelse(lower<0,0,val)) %>%
   select(.,c(12,10,3,16))  %>%
   arrange(.,rei_name,cause_name,location_id) %>%filter(cause_name!='Exposure to mechanical forces'&cause_name!='Other unintentional injuries') %>%
-  filter(rei_name=='Non-optimal temperature') 
+  filter(rei_name=='Non-optimal temperature')
 
 # test_country <- unique(paf_tem_n$location_id)#204
 
 imp_country <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/impburden_cause_country_sens.csv")
-#--------------------#
+# ------------------------------------------------------------
 # Air pollution
-#--------------------#
-air_burden <- imp_country %>% select(-X) %>% merge(.,paf_air_n,by=c('cause_name','location_id'),all.x=TRUE) %>%
-    mutate(lower=lower_95UI*val,upper=upper_95UI*val) %>%
-    arrange(.,country,cause_name) %>% group_by(.,country) %>%
-    mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%
-    select(.,c('country','lower_n','upper_n')) %>% rename(lower=lower_n,upper=upper_n) %>%
-    distinct(.,country, .keep_all = TRUE)
+# ------------------------------------------------------------
+# head(paf_air_n)
+# head(imp_country)
+# head(air_burden)
+
+air_burden <- imp_country %>% select(-X) %>%
+  merge(paf_air_n, by = c('cause_name','location_id'), all.x = TRUE) %>%
+  mutate(lower = lower_95UI * val, upper = upper_95UI * val) %>%
+  group_by(country) %>%
+  summarise(lower = sum(lower, na.rm = TRUE) / 10^6,
+            upper = sum(upper, na.rm = TRUE) / 10^6, .groups = "drop")
 
 #   mutate(lower=lower_95UI*val,upper=upper_95UI*val) %>%
 #   arrange(.,country,cause_name)  %>%group_by(.,country) %>%
-#   mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%select(.,c(3,10,11))%>% 
+#   mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%select(.,c(3,10,11))%>%
 #   select(.,c('country','lower_n','upper_n')) %>% rename(lower=lower_n,upper=upper_n) %>%
 #   distinct(country, .keep_all = TRUE)
 # test_country <- unique(air_burden$country)#204
@@ -1231,43 +1230,43 @@ air_burden <- imp_country %>% select(-X) %>% merge(.,paf_air_n,by=c('cause_name'
 
 write.csv(air_burden, "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/air_sens_1000.csv")
 
-#--------------------#
+# ------------------------------------------------------------
 # Water pollution
-#--------------------#
-wat_burden <- imp_country %>% select(-X) %>% merge(.,paf_wat_n,by=c('cause_name','location_id'),all.x=TRUE) %>%
-  mutate(lower=lower_95UI*val,upper=upper_95UI*val) %>%
-  arrange(.,country,cause_name) %>% group_by(.,country) %>%
-  mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%
-  select(.,c('country','lower_n','upper_n')) %>% rename(lower=lower_n,upper=upper_n) %>%
-  distinct(.,country, .keep_all = TRUE)
+# ------------------------------------------------------------
+
+wat_burden <- imp_country %>% select(-X) %>%
+  merge(paf_wat_n, by = c('cause_name','location_id'), all.x = TRUE) %>%
+  mutate(lower = lower_95UI * val, upper = upper_95UI * val) %>%
+  group_by(country) %>%
+  summarise(lower = sum(lower, na.rm = TRUE) / 10^6,
+            upper = sum(upper, na.rm = TRUE) / 10^6, .groups = "drop")
 
 write.csv(wat_burden, "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_sens_1000.csv")
 
-#--------------------#
+# ------------------------------------------------------------
 # Temperature exposure
-#--------------------#
-tem_burden <- imp_country %>% select(-X) %>% merge(.,paf_tem_n,by=c('cause_name','location_id'),all.x=TRUE) %>%
-  mutate(lower=lower_95UI*val,upper=upper_95UI*val) %>%
-  arrange(.,country,cause_name) %>% group_by(.,country) %>%
-  mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%
-  select(.,c('country','lower_n','upper_n')) %>% rename(lower=lower_n,upper=upper_n) %>%
-  distinct(.,country, .keep_all = TRUE)
+# ------------------------------------------------------------
+tem_burden <- imp_country %>% select(-X) %>%
+  merge(paf_tem_n, by = c('cause_name','location_id'), all.x = TRUE) %>%
+  mutate(lower = lower_95UI * val, upper = upper_95UI * val) %>%
+  group_by(country) %>%
+  summarise(lower = sum(lower, na.rm = TRUE) / 10^6,
+            upper = sum(upper, na.rm = TRUE) / 10^6, .groups = "drop")
 
 write.csv(tem_burden, "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/tem_sens_1000.csv")
 
 #   mutate(lower=lower_95UI*val,upper=upper_95UI*val) %>%
 #   arrange(.,country,cause_name)  %>%group_by(.,country) %>%
-#   mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%select(.,c(3,10,11))%>% 
+#   mutate(lower_n=sum(lower)/10^6,upper_n=sum(upper)/10^6) %>%select(.,c(3,10,11))%>%
 #   select(.,c('country','lower_n','upper_n')) %>% rename(lower=lower_n,upper=upper_n) %>%
 #   distinct(country, .keep_all = TRUE)
-# 
+#
 # write.csv(tem_burden, "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/tem_low_sens.csv")
 
 #####################diseases sens#####################
 ##air
-##14 causes
 cause_air <- imp_country %>% select(-X) %>% merge(.,paf_air_n,by=c('cause_name','location_id'),all.x=TRUE) %>%
-  mutate(lower=lower_95UI*val/10^6,upper=upper_95UI*val/10^6) %>% 
+  mutate(lower=lower_95UI*val/10^6,upper=upper_95UI*val/10^6) %>%
   arrange(.,cause_name,location_id) %>% select(cause_name,location_id,lower,upper)
 write.csv(cause_air,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/cause_air_sens.csv")
 
@@ -1280,8 +1279,7 @@ cause_tem <- imp_country %>% select(-X) %>% merge(.,paf_tem_n,by=c('cause_name',
   mutate(lower=lower_95UI*val/10^6,upper=upper_95UI*val/10^6) %>%
   arrange(.,cause_name,location_id) %>% select(cause_name,location_id,lower,upper)
 write.csv(cause_tem,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/cause_tem_sens.csv")
-##################
-#################
+# ------------------------------------------------------------
 # 10. Sensitivity-analysis summary tables
 # Tables
 num1 <- read_xlsx("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/data/data/population/population_both.xlsx", sheet = 'Estimates',col_names = F)
@@ -1322,17 +1320,17 @@ country <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/data/data/c
 cost_air <- cost_air %>%
   left_join(country %>% select(location_id, location_name),
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
-cost_air <- cost_air %>% subset(rei_name=='Air pollution') 
+cost_air <- cost_air %>% subset(rei_name=='Air pollution')
 
 cost_wat <- cost_wat %>%
   left_join(country %>% select(location_id, location_name),
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
-cost_wat <- cost_wat %>% subset(rei_name=='Unsafe water, sanitation, and handwashing') 
+cost_wat <- cost_wat %>% subset(rei_name=='Unsafe water, sanitation, and handwashing')
 
 cost_tem <- cost_tem %>%
   left_join(country %>% select(location_id, location_name),
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
-cost_tem <- cost_tem %>% subset(rei_name=='Non-optimal temperature') 
+cost_tem <- cost_tem %>% subset(rei_name=='Non-optimal temperature')
 
 country_n <- country %>% select(.,c(2,3)) %>% rename(WBcode=Country.Code,country=location_name)
 gdp <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/gdp_161950_n.csv')
@@ -1340,7 +1338,7 @@ gdp_country <- gdp %>% select(.,c(2:4)) %>% subset(.,year>2019) %>% merge(countr
   group_by(WBcode) %>% mutate(val.gdp=sum(val.gdp)/10^6) %>% select(-year) %>% distinct(.,WBcode,country,.keep_all = TRUE)
 
 inc_grp <- read_xlsx("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/data/data/income group/CLASS.xlsx",sheet = 1)
-inc_grp_n <- inc_grp %>% 
+inc_grp_n <- inc_grp %>%
   select(.,c(2:4)) %>%
   head(., n = 218) %>%
   rename(WBcode=Code,income=`Income group`) %>%
@@ -1355,7 +1353,7 @@ inc_grp_n <- inc_grp %>%
          Region=ifelse(WBcode=='VEN','Others',Region))
 
 air_country <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = 'country') %>%
-  select(-X) %>% merge(.,inc_grp_n,by = 'country') %>% 
+  select(-X) %>% merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region,country.x) %>%
   mutate(num_m=num_m/10^6,
          percent_val=round(burden/val.gdp*100,3),burden=round(burden),
@@ -1372,7 +1370,7 @@ air_country <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = '
 write.csv(air_country,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/air_country_sens_1000.csv")
 
 wat_country <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = 'country') %>%
-  select(-X) %>% merge(.,inc_grp_n,by = 'country') %>% 
+  select(-X) %>% merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region,country.x) %>%
   mutate(num_m=num_m/10^6,
          percent_val=round(burden/val.gdp*100,3),burden=round(burden),
@@ -1389,7 +1387,7 @@ wat_country <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = '
 write.csv(wat_country,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/wat_country_sens_1000.csv")
 
 tem_country <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'country') %>%
-  select(-X) %>% merge(.,inc_grp_n,by = 'country') %>% 
+  select(-X) %>% merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region,country.x) %>%
   mutate(num_m=num_m/10^6,
          percent_val=round(burden/val.gdp*100,3),burden=round(burden),
@@ -1405,12 +1403,11 @@ tem_country <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = '
 
 write.csv(tem_country,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/tem_country_sens_1000.csv")
 
-
 ####################################################################3
 ##Table 2 V2: by income group & region
 air_inc <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = 'country') %>%
   select(-X) %>% merge(.,inc_grp_n,by = c('country')) %>%
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%arrange(.,income,Region) %>% 
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%arrange(.,income,Region) %>%
   group_by(.,income) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                 ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,income,.keep_all = TRUE) %>%
@@ -1425,11 +1422,11 @@ air_inc <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = 'coun
          cost=paste(burden,' ',"(", lower, "-", upper, ")", sep=""),
          percent=paste(percent_val,' ',"(", percent_lower, "-", percent_upper, ")", sep=""),
          capital=paste(capital_val,' ',"(", capital_lower, "-", capital_upper, ")", sep="")) %>%
-  select(c('income','cost','percent','capital')) 
+  select(c('income','cost','percent','capital'))
 
 air_region <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = 'country') %>%
   select(-X) %>% merge(.,inc_grp_n,by = c('country')) %>%
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region) %>% 
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region) %>%
   group_by(.,Region) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                 ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,Region,.keep_all = TRUE) %>%
@@ -1452,7 +1449,7 @@ write.csv(air_region,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/ru
 ##water
 wat_inc <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = 'country') %>%
   select(-X) %>% merge(.,inc_grp_n,by = c('country')) %>%
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%arrange(.,income,Region) %>% 
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%arrange(.,income,Region) %>%
   group_by(.,income) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                 ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,income,.keep_all = TRUE) %>%
@@ -1467,11 +1464,11 @@ wat_inc <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = 'coun
          cost=paste(burden,' ',"(", lower, "-", upper, ")", sep=""),
          percent=paste(percent_val,' ',"(", percent_lower, "-", percent_upper, ")", sep=""),
          capital=paste(capital_val,' ',"(", capital_lower, "-", capital_upper, ")", sep="")) %>%
-  select(c('income','cost','percent','capital')) 
+  select(c('income','cost','percent','capital'))
 
 wat_region <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = 'country') %>%
   select(-X) %>% merge(.,inc_grp_n,by = c('country')) %>%
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region) %>% 
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region) %>%
   group_by(.,Region) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                 ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,Region,.keep_all = TRUE) %>%
@@ -1494,7 +1491,7 @@ write.csv(wat_region,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/ru
 ##tem
 tem_inc <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'country') %>%
   select(-X) %>% merge(.,inc_grp_n,by = c('country')) %>%
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%arrange(.,income,Region) %>% 
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%arrange(.,income,Region) %>%
   group_by(.,income) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                 ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,income,.keep_all = TRUE) %>%
@@ -1509,11 +1506,11 @@ tem_inc <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'coun
          cost=paste(burden,' ',"(", lower, "-", upper, ")", sep=""),
          percent=paste(percent_val,' ',"(", percent_lower, "-", percent_upper, ")", sep=""),
          capital=paste(capital_val,' ',"(", capital_lower, "-", capital_upper, ")", sep="")) %>%
-  select(c('income','cost','percent','capital')) 
+  select(c('income','cost','percent','capital'))
 
 tem_region <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'country') %>%
   select(-X) %>% merge(.,inc_grp_n,by = c('country')) %>%
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region) %>% 
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(.,Region) %>%
   group_by(.,Region) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                 ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,Region,.keep_all = TRUE) %>%
@@ -1532,7 +1529,6 @@ tem_region <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'c
   rbind(tem_inc)
 
 write.csv(tem_region,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/tem_inc&region_sens_1000.csv")
-
 
 ##############by diseases
 air_cause <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/air_allcause.csv")
@@ -1555,8 +1551,8 @@ air_disease <- air_disease %>%
             by = "location_id") %>%
   rename(country = location_name)
 
-air_disease <- air_disease %>% merge(.,inc_grp_n,by = 'country') %>% 
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(cause_name,country.x) %>% 
+air_disease <- air_disease %>% merge(.,inc_grp_n,by = 'country') %>%
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(cause_name,country.x) %>%
   group_by(.,cause_name) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                     ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,cause_name,.keep_all = TRUE) %>%
@@ -1583,8 +1579,8 @@ wat_disease <- wat_disease %>%
             by = "location_id") %>%
   rename(country = location_name)
 
-wat_disease <- wat_disease %>% merge(.,inc_grp_n,by = 'country') %>% 
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(cause_name,country.x) %>% 
+wat_disease <- wat_disease %>% merge(.,inc_grp_n,by = 'country') %>%
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(cause_name,country.x) %>%
   group_by(.,cause_name) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                     ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,cause_name,.keep_all = TRUE) %>%
@@ -1611,8 +1607,8 @@ tem_disease <- tem_disease %>%
             by = "location_id") %>%
   rename(country = location_name)
 
-tem_disease <- tem_disease %>% merge(.,inc_grp_n,by = 'country') %>% 
-  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(cause_name,country.x) %>% 
+tem_disease <- tem_disease %>% merge(.,inc_grp_n,by = 'country') %>%
+  merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>% arrange(cause_name,country.x) %>%
   group_by(.,cause_name) %>% mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
                                     ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,cause_name,.keep_all = TRUE) %>%
@@ -1631,9 +1627,9 @@ tem_disease <- tem_disease %>% merge(.,inc_grp_n,by = 'country') %>%
 
 write.csv(tem_disease,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/tem_diseases_sens_1000.csv")
 
-###############
+# ------------------------------------------------------------
 air_tot <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = 'country') %>%
-  select(-X) %>%  merge(.,inc_grp_n,by = 'country') %>% 
+  select(-X) %>%  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -1653,7 +1649,7 @@ air_tot <- cost_air %>% select(-c(lower,upper)) %>% merge(.,cost2_air,by = 'coun
 write.csv(air_tot,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/air_tot_sens_1000.csv")
 
 wat_tot <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = 'country') %>%
-  select(-X) %>%  merge(.,inc_grp_n,by = 'country') %>% 
+  select(-X) %>%  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -1673,7 +1669,7 @@ wat_tot <- cost_wat %>% select(-c(lower,upper)) %>% merge(.,cost2_wat,by = 'coun
 write.csv(wat_tot,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/wat_tot_sens_1000.csv")
 
 tem_tot <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'country') %>%
-  select(-X) %>%  merge(.,inc_grp_n,by = 'country') %>% 
+  select(-X) %>%  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -1692,7 +1688,7 @@ tem_tot <- cost_tem %>% select(-c(lower,upper)) %>% merge(.,cost2_tem,by = 'coun
   select(c('cost','percent','capital'))
 write.csv(tem_tot,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/tem_tot_sens_1000.csv")
 
-# ============================================================
+# ------------------------------------------------------------
 #
 #
 # air_apm_sens_1000.csv
@@ -1703,16 +1699,13 @@ write.csv(tem_tot,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural
 # water_nahf_sens_1000.csv
 # tem_high_sens_1000.csv
 # tem_low_sens_1000.csv
-# ============================================================
-
-
 # ------------------------------------------------------------
+
 # ------------------------------------------------------------
 
 imp_country_sub <- read.csv(
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/all/impburden_cause_country_sens.csv"
 )
-
 
 # ------------------------------------------------------------
 #
@@ -1751,7 +1744,6 @@ calc_subrisk_sens <- function(
       )
   }
   
-  
   if (!is.null(exclude_causes)) {
     
     paf_sub <- paf_sub %>%
@@ -1760,15 +1752,12 @@ calc_subrisk_sens <- function(
       )
   }
   
-  
   paf_sub <- paf_sub %>%
     filter(
       rei_name == rei_target
     )
   
-  
-  # ------------------------------------------
-  # ------------------------------------------
+  # ------------------------------------------------------------
   
   if (nrow(paf_sub) == 0) {
     
@@ -1781,9 +1770,7 @@ calc_subrisk_sens <- function(
     )
   }
   
-  
-  # ------------------------------------------
-  # ------------------------------------------
+  # ------------------------------------------------------------
   
   result <- imp_country_new %>%
     select(
@@ -1816,14 +1803,12 @@ calc_subrisk_sens <- function(
       .groups = "drop"
     )
   
-  
   return(result)
 }
 
-
-# ============================================================
+# ------------------------------------------------------------
 # 3. AIR POLLUTION
-# ============================================================
+# ------------------------------------------------------------
 
 air_exclude <- c(
   "Asthma",
@@ -1831,7 +1816,6 @@ air_exclude <- c(
   "Otitis media",
   "Upper respiratory infections"
 )
-
 
 # ------------------------------------------------------------
 # APM
@@ -1845,13 +1829,11 @@ air_apm_sens_1000 <- calc_subrisk_sens(
   exclude_causes = air_exclude
 )
 
-
 write.csv(
   air_apm_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/air_apm_sens_1000.csv",
   row.names = FALSE
 )
-
 
 # ------------------------------------------------------------
 # HAP
@@ -1865,13 +1847,11 @@ air_hap_sens_1000 <- calc_subrisk_sens(
   exclude_causes = air_exclude
 )
 
-
 write.csv(
   air_hap_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/air_hap_sens_1000.csv",
   row.names = FALSE
 )
-
 
 # ------------------------------------------------------------
 # AOP
@@ -1885,22 +1865,19 @@ air_aop_sens_1000 <- calc_subrisk_sens(
   exclude_causes = air_exclude
 )
 
-
 write.csv(
   air_aop_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/air_aop_sens_1000.csv",
   row.names = FALSE
 )
 
-
-# ============================================================
+# ------------------------------------------------------------
 # 4. WATER
-# ============================================================
+# ------------------------------------------------------------
 
 water_exclude <- c(
   "Lower respiratory infections"
 )
-
 
 # ------------------------------------------------------------
 # UWS
@@ -1915,13 +1892,11 @@ water_uws_sens_1000 <- calc_subrisk_sens(
   rename_diarrheal = TRUE
 )
 
-
 write.csv(
   water_uws_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_uws_sens_1000.csv",
   row.names = FALSE
 )
-
 
 # ------------------------------------------------------------
 # US
@@ -1936,13 +1911,11 @@ water_us_sens_1000 <- calc_subrisk_sens(
   rename_diarrheal = TRUE
 )
 
-
 write.csv(
   water_us_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_us_sens_1000.csv",
   row.names = FALSE
 )
-
 
 # ------------------------------------------------------------
 # NAHF
@@ -1957,23 +1930,20 @@ water_nahf_sens_1000 <- calc_subrisk_sens(
   rename_diarrheal = TRUE
 )
 
-
 write.csv(
   water_nahf_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_nahf_sens_1000.csv",
   row.names = FALSE
 )
 
-
-# ============================================================
+# ------------------------------------------------------------
 # 5. TEMPERATURE
-# ============================================================
+# ------------------------------------------------------------
 
 temperature_exclude <- c(
   "Exposure to mechanical forces",
   "Other unintentional injuries"
 )
-
 
 # ------------------------------------------------------------
 # High temperature
@@ -1986,13 +1956,11 @@ tem_high_sens_1000 <- calc_subrisk_sens(
   exclude_causes = temperature_exclude
 )
 
-
 write.csv(
   tem_high_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/tem_high_sens_1000.csv",
   row.names = FALSE
 )
-
 
 # ------------------------------------------------------------
 # Low temperature
@@ -2005,15 +1973,12 @@ tem_low_sens_1000 <- calc_subrisk_sens(
   exclude_causes = temperature_exclude
 )
 
-
 write.csv(
   tem_low_sens_1000,
   "/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/tem_low_sens_1000.csv",
   row.names = FALSE
 )
 
-
-# ------------------------------------------------------------
 # ------------------------------------------------------------
 
 cat("\n========= Sub-risk sensitivity 1000 check =========\n")
@@ -2046,13 +2011,13 @@ air_apm1 <- air_apm %>%
   distinct(country, .keep_all = TRUE) %>% select(-c(burden))%>% rename(burden=burden_n)
 
 air_tot_apm <- air_apm1  %>% merge(.,sens_apm_air,by = 'country') %>%
-   merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,burden,.keep_all = TRUE) %>%
   select(.,c('burden','lower','upper','gdp','num')) %>%
-  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9, 
+  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9,
          percent_val=round(burden/gdp*100,3),
          percent_lower=round(lower/gdp*100,3),
          percent_upper=round(upper/gdp*100,3),
@@ -2072,13 +2037,13 @@ air_hap1 <- air_hap %>%
   distinct(country, .keep_all = TRUE) %>% select(-c(burden))%>% rename(burden=burden_n)
 
 air_tot_hap <- air_hap1  %>% merge(.,sens_hap_air,by = 'country') %>%
-   merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,burden,.keep_all = TRUE) %>%
   select(.,c('burden','lower','upper','gdp','num')) %>%
-  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9, 
+  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9,
          percent_val=round(burden/gdp*100,3),
          percent_lower=round(lower/gdp*100,3),
          percent_upper=round(upper/gdp*100,3),
@@ -2096,7 +2061,7 @@ air_aop <- air_aop %>%
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
 
 air_tot_aop <- air_aop %>% select(-c(lower,upper)) %>% merge(.,sens_aop_air,by = 'country') %>%
-   merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -2117,8 +2082,7 @@ air_tot_aop <- air_aop %>% select(-c(lower,upper)) %>% merge(.,sens_aop_air,by =
 air_tot_combined <- rbind(air_tot_apm,air_tot_aop,air_tot_hap)
 write.csv(air_tot_combined,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/air_subrisk_sens_1000.csv")
 
-
-#-------------------------------------------------------------------------------------
+# ------------------------------------------------------------
 wat_uws <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/wat_uws.csv')
 wat_us <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/wat_us.csv')
 wat_nahf <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/wat_nahf.csv')
@@ -2127,7 +2091,6 @@ sens_uws_wat <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcom
 sens_us_wat <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_us_sens_1000.csv")
 sens_nahf_wat <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_nahf_sens_1000.csv")
 
-
 # cost2_wat <- read.csv("/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/water_sens.csv")
 #us
 wat_us <- wat_us %>%
@@ -2135,7 +2098,7 @@ wat_us <- wat_us %>%
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
 
 wat_tot_us <- wat_us %>% select(-c(lower,upper)) %>% merge(.,sens_us_wat,by = 'country') %>%
-   merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -2159,7 +2122,7 @@ wat_uws <- wat_uws %>%
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
 
 wat_tot_uws <- wat_uws %>% select(-c(lower,upper)) %>% merge(.,sens_uws_wat,by = 'country') %>%
-  merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -2183,7 +2146,7 @@ wat_nahf <- wat_nahf %>%
             by = c("country" = "location_id"))%>% select(.,c(2,7,4,5,6))%>% rename(country=location_name)
 
 wat_tot_nahf <- wat_nahf %>% select(-c(lower,upper)) %>% merge(.,sens_nahf_wat,by = 'country') %>%
-  merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
@@ -2204,8 +2167,7 @@ wat_tot_nahf <- wat_nahf %>% select(-c(lower,upper)) %>% merge(.,sens_nahf_wat,b
 wat_tot_combined <- rbind(wat_tot_uws, wat_tot_us, wat_tot_nahf)
 write.csv(wat_tot_combined,"/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/sen_table_outcome/water_subrisk_sens_1000.csv")
 
-
-#----------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------
 tem_high <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/tem_ht.csv')
 tem_low <- read.csv('/dssg/home/acct-wenze.zhong/jingxuanw/economic2/outcome/rural outcome/air&met/tem_lt.csv')
 
@@ -2221,13 +2183,13 @@ tem_high1 <- tem_high %>%
   distinct(country, .keep_all = TRUE) %>% select(-c(burden))%>% rename(burden=burden_n)
 
 tem_tot_high <- tem_high1  %>% merge(.,sens_high_tem,by = 'country') %>%
-  merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,burden,.keep_all = TRUE) %>%
   select(.,c('burden','lower','upper','gdp','num')) %>%
-  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9, 
+  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9,
          percent_val=round(burden/gdp*100,3),
          percent_lower=round(lower/gdp*100,3),
          percent_upper=round(upper/gdp*100,3),
@@ -2248,13 +2210,13 @@ tem_low1 <- tem_low %>%
   distinct(country, .keep_all = TRUE) %>% select(-c(burden))%>% rename(burden=burden_n)
 
 tem_tot_low <- tem_low1  %>% merge(.,sens_low_tem,by = 'country') %>%
-  merge(.,inc_grp_n,by = 'country') %>% 
+  merge(.,inc_grp_n,by = 'country') %>%
   merge(gdp_country,by=c('country','WBcode')) %>% merge(num_n,by='WBcode') %>%
   mutate(.,burden=round(sum(burden),2),lower=round(sum(lower),2)
          ,upper=round(sum(upper),2),gdp=sum(val.gdp),num=sum(num_m)) %>%
   distinct(.,burden,.keep_all = TRUE) %>%
   select(.,c('burden','lower','upper','gdp','num')) %>%
-  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9, 
+  mutate(.,burden=round(burden/10^3),lower=round(lower/10^3),upper=round(upper/10^3),gdp=gdp/10^3,num=num/10^9,
          percent_val=round(burden/gdp*100,3),
          percent_lower=round(lower/gdp*100,3),
          percent_upper=round(upper/gdp*100,3),
